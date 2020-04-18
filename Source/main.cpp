@@ -8,7 +8,6 @@
 //#include "network.h"
 
 #include "onboard.h"
-#include "offboard.h"
 /*
 #include "Navio/Navio2/PWM.h"
 #include "Navio/Navio2/ADC_Navio2.h"
@@ -45,12 +44,16 @@ int main() {
 	float stateTrueDot[12] = {};
 	float     stateEst[12] = {};
 	float     stateDes[12] = {};
-	float     measData[16] = {}; // {x, y, z1, z2, p1, q1, r1, ax1, ay1, az1, p2, q2, r2, ax2, ay2. az2}
+	float     measData[16] = {}; // {x, y, z1, z2, p1, q1, r1, ax1, ay1, az1, p2, q2, r2, ax2, ay2, az2}
+	float    PPast[12][12] = {};
 	float         aTrue[3] = {};
 	
-	stateTrue[X] = -6; // starts 6 meters from landing pad
+	stateTrue[X] = -6; // starts 6 meters from landing pad in the x direction
+	stateTrue[Y] =  0; // starts in line in the y direction
 	stateTrue[Z] = -4; // starts 4 meters above the ground
-
+	
+	stateDes[X] =  0; // wants to reach landing pad which is at 0,0
+	stateDes[Y] =  0; // wants to reach landing pad which is at 0,0
 	stateDes[Z] = -4; // wants to stay 4 meters above the ground
 
 	// autonomous or RC? this will aquired from ground terminal command 
@@ -66,7 +69,7 @@ int main() {
 	int step = 0;
 	float t = (float)0;
 	const float dt = (float)0.001;
-	const float endt = (float)30;
+	const float endt = (float)15;
 	
 	// initialize csv writing (SIMULATION only)
 	ofstream myfile("dataLog.csv");
@@ -76,16 +79,32 @@ int main() {
 	string labelPowerCmd = "power_1,power_2,power_3,power_4,";
 	string labelTrue = "x_TRUE,y_TRUE,z_TRUE,phi_TRUE,the_TRUE,psi_TRUE,u_TRUE,v_TRUE,w_TRUE,p_TRUE,q_TRUE,r_TRUE,";
 	string labelTrueDot = "x_DOT_TRUE,y_DOT_TRUE,z_DOT_TRUE,phi_DOT_TRUE,the_DOT_TRUE,psi_DOT_TRUE,u_DOT_TRUE,v_DOT_TRUE,w_DOT_TRUE,p_DOT_TRUE,q_DOT_TRUE,r_DOT_TRUE,";
-	string labelMeas = "x_MEAS,y_MEAS,z1_MEAS,z2_MEAS,p1_MEAS,q1_MEAS,r1_MEAS,ax1_MEAS,ay1_MEAS,az1_MEAS,p2_MEAS,q2_MEAS,r2_MEAS,ax2_MEAS,ay2_MEAS,az2_MEAS";
+	string labelMeas = "x_MEAS,y_MEAS,z1_MEAS,z2_MEAS,p1_MEAS,q1_MEAS,r1_MEAS,ax1_MEAS,ay1_MEAS,az1_MEAS,p2_MEAS,q2_MEAS,r2_MEAS,ax2_MEAS,ay2_MEAS,az2_MEAS,";
 	string labelEst = "x_EST,y_EST,z_EST,phi_EST,the_EST,psi_EST,u_EST,v_EST,w_EST,p_EST,q_EST,r_EST,";
 	string labelDes = "x_DES,y_DES,z_DES,phi_DES,the_DES,psi_DES,u_DES,v_DES,w_DES,p_DES,q_DES,r_DES,";
 
 	myfile << labelTime << labelStick << labelPowerCmd << labelTrue << labelTrueDot << labelMeas << labelEst << labelDes << "\n";
 
+	// --test area--
+	
+	//while (t <= endt - dt) {
+	//	step++;
+	//	t += dt;
+	//	vehicleModel(stateTrue, stateTrueDot, aTrue, powerCmd, dt);
+	//}
+
+	//cout << "test completed";
+	//return 0;
+	// -------------
+
+
 	// loopdy loop
 	while (t <= endt - dt) {
 		step++;
 		t += dt;
+		
+		if (t > 5)
+			stateDes[Z] = -6;
 
 		if (simulationEnabled) {
 			vehicleModel(stateTrue, stateTrueDot, aTrue, powerCmd, dt);
@@ -97,7 +116,7 @@ int main() {
 			readCam(measData);
 		}
 
-		navigation(measData, powerCmd, stateEst);
+		navigation(measData, powerCmd, PPast, stateEst);
 		
 		if (trueStateOnlyEnabled) {
 			guidance(stateTrue, stateDes, xyzpsiErrPast, xyzpsiErrSum, stickAuto);
@@ -134,5 +153,7 @@ int main() {
 
 	myfile.close();
 
+
+	cout << "completed";
 	return 0;
 }

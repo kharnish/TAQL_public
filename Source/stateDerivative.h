@@ -2,6 +2,7 @@
 #ifndef stateDerivative_h
 #define stateDerivative_h
 #include "macro.h"
+#include <math.h>
 
 // camera
 #define sigX 0
@@ -40,23 +41,16 @@
 #define T_by_omega2 0.000005
 
 void stateDerivative(float* x, float* xDot, float* a, float* powerCmd) {
-	
-	// find omega2 from powerCmd
-	float omega2[4] = {};
-	for (int i = 0; i < 4; i++) {
-		omega2[i] = powerCmd[i] / P_by_omega2;
-	}
-
 	// calculate motor torques
 	float Qb[4] = {};
 	for (int i = 0; i < 4; i++) {
-		Qb[i] = Qb_by_omega2 * omega2[i];
+		Qb[i] = Qb_by_omega2 / P_by_omega2 * powerCmd[i];
 	}
 
 	// calculate thrusts (defined positive)
 	float T[4] = {};
 	for (int i = 0; i < 4; i++) {
-		T[i] = T_by_omega2 * omega2[i];
+		T[i] = T_by_omega2 / P_by_omega2 * powerCmd[i];
 	}
 
 	// calculate propeller caused forces and moments

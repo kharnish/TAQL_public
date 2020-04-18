@@ -2,6 +2,15 @@
 #ifndef onboard_h
 #define onboard_h
 #include "stateDerivative.h"
+
+// From the AccelGyroMag.cpp example
+#include "Common/MPU9250.h"
+#include "Navio2/LSM9DS1.h"
+#include "Common/Util.h"
+#include <unistd.h>
+#include <string>
+#include <memory>
+
 /*
 #include "MPU9250.h" // IMU1 header
 #include "LSM9DS1.h" // IMU2 header
@@ -46,20 +55,23 @@ std::unique_ptr <InertialSensor> get_inertial_sensor() {
 #endif
 */
 
-void matMult(float a[12][12], float b[12], float mul[12]);
+void matMult(float a[12][12], float* b, float* mul);
 void matMult(float a[12][12], float b[12][12], float mul[12][12]);
-void matMult(float a[12][12], float b[12][3], float mul[12][3]);
-void matMult(float a[12][3], float b[3][12], float mul[12][12]);
-void matMult(float a[12][3], float b[3][3], float mul[12][3]);
+void matMult5(float a[12][12], float b[12][3], float mul[12][3]);
+void matMult4(float a[12][3], float b[3][12], float mul[12][12]);
+void matMult3(float a[12][3], float b[3][3], float mul[12][3]);
+void matMult2(float a[3][12], float* b, float* mul);
+void matMult1(float a[3][12], float b[12][3], float mul[3][3]);
+void matMult0(float a[3][12], float b[12][12], float mul[3][12]);
 
 void matScale(float a[12][12], float con, float mul[12][12]);
-void matScale(float a[12], float con, float mul[12]);
+void matScale(float* a, float con, float* mul);
 
 void matAdd(float a[12][12], float b[12][12], float mul[12][12]);
 void matAdd(float a[3][3], float b[3][3], float mul[3][3]);
-void matAdd(float a[12], float b[12], float mul[12]);
+void matAdd1(float* a, float* b, float* mul);
 
-void matSub(float a[12], float b[12], float mul[12]);
+void matSub(float* a, float* b, float* mul);
 void matInv(float a[3][3], float mul[3][3]);
 
 
@@ -79,14 +91,18 @@ void vehicleController(float* stick, float* measData, float* powerCmd) {
 	}
 	motorCmd[3] = stick[THRUST];
 
-	powerCmd[0] = float(0.125)*(float(4) - motorCmd[0] + motorCmd[1] + motorCmd[2] + motorCmd[3]);
-	powerCmd[1] = float(0.125)*(float(4) + motorCmd[0] - motorCmd[1] + motorCmd[2] + motorCmd[3]);
-	powerCmd[2] = float(0.125)*(float(4) + motorCmd[0] + motorCmd[1] - motorCmd[2] + motorCmd[3]);
-	powerCmd[3] = float(0.125)*(float(4) - motorCmd[0] - motorCmd[1] - motorCmd[2] + motorCmd[3]);
+	powerCmd[0] = -motorCmd[0] + motorCmd[1] + motorCmd[2] + motorCmd[3];
+	powerCmd[1] =  motorCmd[0] - motorCmd[1] + motorCmd[2] + motorCmd[3];
+	powerCmd[2] =  motorCmd[0] + motorCmd[1] - motorCmd[2] + motorCmd[3];
+	powerCmd[3] = -motorCmd[0] - motorCmd[1] - motorCmd[2] + motorCmd[3];
+
+	for (int i = 0; i < 4; i++) {
+		if (motorCmd[i] > 1) motorCmd[i] = 1;
+		if (motorCmd[i] < 0) motorCmd[i] = 0;
+	}
 }
 
-
-void navigation(float* measData, float* powerCmd, float* stateEst) {
+void navigation(float* measData, float* powerCmd, float PPast[12][12], float* stateEst) {
 	// recieves sensor (measured) data and outputs estimated states from Kalman Filter
 	// helpful reference: http://robotsforroboticists.com/kalman-filtering/
 
@@ -101,9 +117,9 @@ void navigation(float* measData, float* powerCmd, float* stateEst) {
 	bool takeMeasure = true;
 	float dt = (float)0.05;
 
-	float accel[3] = {}; // this is ax, ay, az which we measure
+	float accel[3] = { measData[AX1], measData[AY1], measData[AZ1] }; // we could include both weighted accelerometer measures
 
-	// TODO: we need to figure out this matrix so that stateNew = A*statePast, to give x = A*statePast + B*action
+	// TODO: stateNew = A*statePast, to give x = A*statePast + B*action
 	float A[12][12] = {};
 	A[0][6] = cos(stateEst[PSI]);
 	A[0][7] = -sin(stateEst[PSI]);
@@ -129,7 +145,7 @@ void navigation(float* measData, float* powerCmd, float* stateEst) {
 		}
 	}
 
-	// C isn't just an identity matrix, because we're not taking a measurement of every state, only count X, Y, and Z
+	// C is the states where we're taking a measurement
 	float C[3][12] = {};
 	C[0][X] = 1;
 	C[1][Y] = 1;
@@ -139,7 +155,7 @@ void navigation(float* measData, float* powerCmd, float* stateEst) {
 	CTransp[Y][1] = 1;
 	CTransp[Z][2] = 1;
 
-	float pMat[12][12] = {};
+	float pMat[12][12] = { };
 	float Qc[12][12] = {};	// expected values of disturbance (w^2)
 	float Rc[3][3] = {};	// expected values of noise variance (v^2)
 	float Kc[12][3] = {};	// how much we want to weight the error
@@ -154,15 +170,17 @@ void navigation(float* measData, float* powerCmd, float* stateEst) {
 
 	for (int i = 0; i < 12; i++)
 	{
-		pMat[i][i] = 1;
 		Qc[i][i] = 1;
 		I[i][i] = 1;
 		stateEstPast[i] = stateEst[i];
 		xEst[i] = stateEst[i];
+		for (int j = 0; j < 12; j++) {
+			pMat[i][j] = PPast[i][j];
+		}
 	}
 	for (int i = 0; i < 3; i++) {
 		Rc[i][i] = 1;
-		stateMeas[i] = measData[i]; // only include the X, Y, Z data
+		stateMeas[i] = measData[i]; // only include the X, Y, Z camera data
 	}
 
 	// Start the actual agorithm
@@ -202,12 +220,12 @@ void navigation(float* measData, float* powerCmd, float* stateEst) {
 	float pDot3[12][12] = {};
 	float pDot4[12][12] = {};
 
-	matMult(A, pMat, temp1);
-	matMult(temp1, ATransp, temp2);
-	matAdd(temp2, Qc, pDot1); 	// pDot1 = A*P*A' + Q
+	matMult(A, pMat, temp1); // [12x12 * 12x12 = 12x12]
+	matMult(temp1, ATransp, temp2); // [12x12 * 12x12 = 12x12]
+	matAdd(temp2, Qc, pDot1); 	// pDot1 = A*P*A' + Q [12x12 + 12x12 = 12x12]
 
 	matScale(pDot1, dt / float(2), temp1);
-	matAdd(pMat, temp1, temp2);
+	matAdd(pMat, temp1, temp2); // [12x12 + 12x12 = 12x12]
 	matMult(A, temp2, temp1);
 	matMult(temp1, ATransp, temp2);
 	matAdd(temp2, Qc, pDot2); // pDot2 = A*(P + pDot1*dt/2)*A' + Q
@@ -234,60 +252,77 @@ void navigation(float* measData, float* powerCmd, float* stateEst) {
 	matScale(pDot, dt, temp1);
 	matAdd(pMat, temp1, pMatTemp); // pMatTemp = pMat + pDot*dt. This is the first pMat before the measurements
 
+	// my zoom failed me i think? 
+	// Yeah, you're not there anymore...
+	// I thought it was my whole wifi and i got scared this would die
+	// It does that if your wifi is *too slow* and kicks you out of zoom. Discord? or just type lol
+	// yea i tried relaunching it and it still didnt work. its beacuse the liveshare. Discord yup
+	// we should just leave this in the code
+	// why not? a little easter egg for our future selves
 
+	// correct the Kalman Filter with measurements
 	if (takeMeasure = true)
 	{
-		// TODO: ask Johnson about how we take in the acceleration measurements if they're not an actual state
-		// treat IMU data as part of the process model, the dynamics as opposed to the updates. We can just pretend it's the actual process. Have the processs driven by the inertial data. But there's also process noise which is now measurement noise
-
-		// correct the Kalman Filter, would be running onboard
 		// make estimate of what the measures would be from xest = C*transp(Y)	
 		float yEst[3] = {};
-		matMult(C, xEst, yEst);
-		float stateMeasEst[12] = { yEst[0], yEst[1], yEst[2], 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+		float stateMeasEst[12] = { };
+		//matMult2(C, xEst, yEst); // [3x12 * 12x1 = 3x1] 
+		// Matrix multiplication of a 3x12 and 12x3 matrix = 3x3 matrix
 
-		// calculate Kc - note: Vitor calls 'C' as 'H' in his example
+		for (int i = 0; i < 3; i++)
+		{
+			for (int k = 0; k < 12; k++)
+			{
+				yEst[i] += C[i][k] * xEst[k];
+			}
+		}
+
+		stateMeasEst[0] = yEst[0];
+		stateMeasEst[1] = yEst[1];
+		stateMeasEst[2] = yEst[2];
+
+		// calculate Kc
 		float temp6a[12][3] = {};
 		float temp6b[3][12] = {};
 		float temp6c[3][3] = {};
 		float temp6d[3][3] = {};
-		matMult(pMatTemp, CTransp, temp6a);	// ta = P * C'
-		matMult(C, pMatTemp, temp6b);		// tb = C * P
-		matMult(temp6b, CTransp, temp6c);	// tc = C * P * C'
-		matAdd(temp6c, Rc, temp6d);			// td = C * P * C' + Rc
-		matInv(temp6d, temp6c);				// tc = inv(C * pDot * C' + Rc)
-		matMult(temp6a, temp6c, Kc);		// Kc = P * C' * inv(C * P * C' + Rc)
+		matMult5(pMatTemp, CTransp, temp6a);// ta = P * C'					[12x12 * 12x3 = 12x3]
+		matMult0(C, pMatTemp, temp6b);		// tb = C * P					[3x12 * 12x12 = 3x12]
+		matMult1(temp6b, CTransp, temp6c);	// tc = C * P * C'				[3x12 * 12x3 = 3x3]
+		matAdd(temp6c, Rc, temp6d);			// td = C * P * C' + Rc			[3x3 * 3x3 = 3x3]
+		matInv(temp6d, temp6c);				// tc = inv(C * pDot * C' + Rc)	[3x3]
+		matMult3(temp6a, temp6c, Kc);		// Kc = P * C' * inv(C * P * C' + Rc)	[12x3 * 3x3 = 12x3]
 
 		// Apply the measurement's contribution to xEstDot
 		// this is the same as xhat = xhat + K*residual, where residual = C*(state - lastState)
 		float temp12a[12] = {};
 		float temp12b[12] = {};
-		matMult(Kc, C, temp1);						// t1 = Kc * C
-		matSub(stateMeas, stateMeasEst, temp12a);	// ta = stateMeas - stateMeasEst
-		matMult(temp1, temp12a, temp12b);			// Kc * C * (stateMeas - stateMeasEst) [12x12 * 12x0]
-		matAdd(totalXEstDot, temp12b, temp12a);		// newTotalXEstDot = totalXEstDot + Kc * C * (stateMeas - stateMeasEst)
+		matMult4(Kc, C, temp1);						// t1 = Kc * C
+		matSub(stateMeas, stateMeasEst, temp12a);	// ta = stateMeas - stateMeasEst			[12x1 - 12x1 = 12x1]
+		matMult(temp1, temp12a, temp12b);			// Kc * C * (stateMeas - stateMeasEst)		[12x12 * 12x1 = 12x1]
+		matAdd1(totalXEstDot, temp12b, temp12a);	// newTotalXEstDot = totalXEstDot + Kc * C * (stateMeas - stateMeasEst)
 
 		// correct P estimate
-		matMult(Kc, C, temp1);			// t1 = Kc * C
+		matMult4(Kc, C, temp1);			// t1 = Kc * C
 		matScale(temp1, -1, temp2);		// t2 = -Kc*C
 		matAdd(I, temp2, temp1);		// t1 = I + (-Kc*C)
-		matMult(temp2, pMatTemp, pMat); // pMatNew = (I - Kc * C) * pMat
+		matMult(temp2, pMatTemp, PPast); // pMatNew = (I - Kc * C) * pMat
 	}
 
 	// actually finish integrating
 	float temp12[12] = {};
 	matScale(totalXEstDot, dt, temp12); // t1 = totalXEstDot * dt
-	matAdd(xEst, temp12, xEstNew);		// xEstNew = xEstOld + totalXEstDot * dt
+	matAdd1(xEst, temp12, xEstNew);		// xEstNew = xEstOld + totalXEstDot * dt
 	for (int i = 0; i < 12; i++) {
 		// stateEst[i] = xEstNew[i] // this is just commented out so it doesn't break anything
 	}
 }
 
 void guidance(float* stateEst, float* stateDes, float* xyzpsiErrPast, float* xyzpsiErrSum, float* stick) {
-	float Ks = float(3.14) / float(6.0) / float(100.0);
+	float Ks = float(1);
 	float Kp = float(1);
-	float Ki = float(0.001);
-	float Kd = float(-0.1);
+	float Ki = float(0.0002);
+	float Kd = float(0);
 
 	stateDes[PSI] = (stateDes[Y] - stateEst[Y]) / (stateDes[X] - stateEst[X]);
 
@@ -314,10 +349,14 @@ void guidance(float* stateEst, float* stateDes, float* xyzpsiErrPast, float* xyz
 	pqrwErr[0] = stateDes[P] - stateEst[P];
 	pqrwErr[1] = stateDes[Q] - stateEst[Q];
 	pqrwErr[2] = stateDes[R] - stateEst[R];
-	pqrwErr[3] = stateDes[W] - stateEst[W];
+	pqrwErr[3] = -(stateDes[W] - stateEst[W]);
 
 	for (int i = 0; i < 4; i++) {
 		stick[i] = Ks * pqrwErr[i];
+		
+		if (stick[i] > 1) stick[i] = 1;
+		if (stick[i] < -1) stick[i] = -1;
+		
 	}
 
 	for (int i = 0; i < 4; i++) {
@@ -326,7 +365,47 @@ void guidance(float* stateEst, float* stateDes, float* xyzpsiErrPast, float* xyz
 }
 
 void readIMU(float* imuData) {
-	/*
+	// --- From the AccelGyroMag.cpp example --- //
+	// .\Examples\AccelGyroMag\AccelGyroMag.cpp
+	
+	// measData // {x, y, z1, z2, p1, q1, r1, ax1, ay1, az1, p2, q2, r2, ax2, ay2, az2}
+
+	if (check_apm()) {
+        return 1;
+    }
+
+    // auto sensor_name = get_sensor_name(argc, argv);
+	auto sensor_name1 = 'mpu';
+	auto sensor_name2 = 'lsm';
+
+    //auto sensor = get_inertial_sensor(sensor_name);
+	auto sensor1 = std::unique_ptr <InertialSensor>{ new MPU9250() };
+	auto sensor2 = std::unique_ptr <InertialSensor>{ new LSM9DS1() };
+
+    sensor1->initialize();
+	sensor2->initialize();
+
+	float ax, ay, az;
+	float gx, gy, gz;
+	float mx, my, mz;
+
+	while (1) {
+		// so, I'm not actually sure what these functions are, or where to find them, but this is how they were in the example
+		sensor1->update();
+		sensor1->read_accelerometer(&ax, &ay, &az);
+		imuData[AX1] = ax;
+		imuData[AY1] = ay;
+		imuData[AZ1] = az;
+		sensor2->update();
+		sensor2->read_accelerometer(&ax, &ay, &az);
+		imuData[AX2] = ax;
+		imuData[AY2] = ay;
+		imuData[AZ2] = az;
+		// sensor->read_gyroscope(&gx, &gy, &gz);
+		// sensor->read_magnetometer(&mx, &my, &mz);
+	}
+	
+/*
 	//imu initializer
 	printf( "Init IMU and Mag\n" );
 	auto imu = get_inertial_sensor();    
@@ -375,164 +454,178 @@ void readIMU(float* imuData) {
 }
 
 void readSonar(float* stateMeas) {
-
+	stateMeas[Z2] = 0;
 }
 
 void readCam(float* stateMeas) {
-
+	stateMeas[X] = 0;
+	stateMeas[Y] = 0;
+	stateMeas[Z1] = 0;
 }
 
 void readRC(float* stick) {
 	stick[ROLL] = 0;   // -1 to 1
 	stick[PITCH] = 0;  // -1 to 1
 	stick[YAW] = 0;    // -1 to 1
-	stick[THRUST] = 0; //  0 to 1
+	stick[THRUST] = 0; // 0? to 1
 }
 
-void matMult(float a[12][12], float b[12], float mul[12]) {
-	// Matrix multiplication of a 12x12 and 12x0 matrix
 
-	int r = 12, c = 12;
+// --- All the matrix math functions --- //
 
-	for (int i = 0; i < r; i++)
+void matMult(float a[12][12], float* b, float* mul) {
+	// Matrix multiplication of a 12x12 and 12x1 matrix
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
+		for (int j = 0; j < 12; j++)
 		{
-			for (int k = 0; k < c; k++)
-			{
-				mul[i] += a[i][k] * b[k];
-			}
+			mul[i] += a[i][j] * b[j];
 		}
 	}
 }
 void matMult(float a[12][12], float b[12][12], float mul[12][12]) {
 	// Matrix multiplication of two 12x12 matrices
-
-	int r = 12, c = 12;
-
-	for (int i = 0; i < r; i++)
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
+		for (int j = 0; j < 12; j++)
 		{
-			for (int k = 0; k < c; k++)
+			for (int k = 0; k < 12; k++)
 			{
 				mul[i][j] += a[i][k] * b[k][j];
 			}
 		}
 	}
 }
-void matMult(float a[12][12], float b[12][3], float mul[12][3]) {
+void matMult5(float a[12][12], float b[12][3], float mul[12][3]) {
 	// Matrix multiplication of a 12x12 and 12x3 matrix = 12x3 matrix
-	int r = 12, c = 3;
-
-	for (int i = 0; i < r; i++)
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
+		for (int j = 0; j < 3; j++)
 		{
-			for (int k = 0; k < c; k++)
+			for (int k = 0; k < 12; k++)
 			{
 				mul[i][j] += a[i][k] * b[k][j];
 			}
 		}
 	}
 }
-void matMult(float a[12][3], float b[3][12], float mul[12][12]) {
-	// Matrix multiplication of a 12x3 and 3x12 matrix
-
-	int r = 12, c = 12;
-
-	for (int i = 0; i < r; i++)
+void matMult4(float a[12][3], float b[3][12], float mul[12][12]) {
+	// Matrix multiplication of a 12x3 and 3x12 matrix = 12x12 matrix
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
+		for (int j = 0; j < 12; j++)
 		{
-			for (int k = 0; k < c; k++)
+			for (int k = 0; k < 3; k++)
 			{
 				mul[i][j] += a[i][k] * b[k][j];
 			}
 		}
 	}
 }
-void matMult(float a[12][3], float b[3][3], float mul[12][3]) {
+void matMult3(float a[12][3], float b[3][3], float mul[12][3]) {
 	// Matrix multiplication of a 12x3 and 3x3 matrix = 12x3 matrix
-	int r = 12, c = 3;
-
-	for (int i = 0; i < r; i++)
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
+		for (int j = 0; j < 3; j++)
 		{
-			for (int k = 0; k < c; k++)
+			for (int k = 0; k < 3; k++)
 			{
 				mul[i][j] += a[i][k] * b[k][j];
 			}
 		}
 	}
 }
+void matMult2(float a[3][12], float* b, float* mul) {
+	// Matrix multiplication of a 3x12 and 12x3 matrix = 3x3 matrix
+	for (int i = 0; i < 3; i++)
+	{
+		for (int k = 0; k < 12; k++)
+		{
+			mul[i] += a[i][k] * b[k];
+		}
+	}
+}
+void matMult1(float a[3][12], float b[12][3], float mul[3][3]) {
+	// Matrix multiplication of a 3x12 and 12x3 matrix = 3x3 matrix
+	for (int i = 0; i < 3; i++)
+	{
+		for (int j = 0; j < 3; j++)
+		{
+			for (int k = 0; k < 12; k++)
+			{
+				mul[i][j] += a[i][k] * b[k][j];
+			}
+		}
+	}
+}
+void matMult0(float a[3][12], float b[12][12], float mul[3][12]) {
+	// Matrix multiplication of a 3x12 and 12x3 matrix = 3x3 matrix
+	for (int i = 0; i < 3; i++)
+	{
+		for (int j = 0; j < 12; j++)
+		{
+			for (int k = 0; k < 12; k++)
+			{
+				mul[i][j] += a[i][k] * b[k][j];
+			}
+		}
+	}
+}
+
 void matScale(float a[12][12], float con, float mul[12][12]) {
 	// Scale a 12x12 matrix by a constant
-	int r = 12, c = 12;
-	for (int i = 0; i < r; i++)
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
+		for (int j = 0; j < 12; j++)
 		{
 			mul[i][j] = a[i][j] * con;
 		}
 	}
 }
-void matScale(float a[12], float con, float mul[12]) {
+void matScale(float* a, float con, float* mul) {
 	// Scale a 12x12 matrix by a constant
-	int r = 12;
-	for (int i = 0; i < r; i++)
+	for (int i = 0; i < 12; i++)
 	{
 		mul[i] = a[i] * con;
 	}
 }
+
 void matAdd(float a[12][12], float b[12][12], float mul[12][12]) {
 	// Matrix addition of two 12x12 matrices
-	int r = 12, c = 12;
-	for (int i = 0; i < r; i++)
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
+		for (int j = 0; j < 12; j++)
 		{
 			mul[i][j] = a[i][j] + b[i][j];
 		}
 	}
 }
 void matAdd(float a[3][3], float b[3][3], float mul[3][3]) {
-	// Matrix addition of two 6x6 matrices
-	int r = 6, c = 6;
-	for (int i = 0; i < r; i++)
+	// Matrix addition of two 3x3 matrices
+	for (int i = 0; i < 3; i++)
 	{
-		for (int j = 0; j < c; j++)
+		for (int j = 0; j < 3; j++)
 		{
 			mul[i][j] = a[i][j] + b[i][j];
 		}
 	}
 }
-void matAdd(float a[12], float b[12], float mul[12]) {
-	// Matrix addition of two 12x12 matrices
-	int r = 12, c = 1;
-	for (int i = 0; i < r; i++)
+void matAdd1(float* a, float* b, float* mul) {
+	// Matrix addition of two 12x1 matrices
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
-		{
-			mul[i] = a[i] + b[i];
-		}
+		mul[i] = a[i] + b[i];
 	}
 }
-void matSub(float a[12], float b[12], float mul[12]) {
-	// Matrix subtraction of two 12x12 matrices
-	int r = 12, c = 1;
-	for (int i = 0; i < r; i++)
+void matSub(float* a, float* b, float* mul) {
+	// Matrix subtraction of two 12x1 matrices
+	for (int i = 0; i < 12; i++)
 	{
-		for (int j = 0; j < c; j++)
-		{
-			mul[i] = a[i] - b[i];
-		}
+		mul[i] = a[i] - b[i];
 	}
 }
 void matInv(float a[3][3], float mul[3][3]) {
 	// Matrix invserion of a 3x3 matrix
-	int r = 3, c = 3;
 	float det = 0;
 	float aT[3][3] = { };
 
