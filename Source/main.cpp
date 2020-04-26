@@ -1,35 +1,13 @@
 #include <iostream>
 #include <fstream>
 #include <cstdio>
-//#include <unistd>
 #include <string>
 #include <memory>
 #include <time.h>
-//#include "network.h"
 
 #include "onboard.h"
-/*
-#include "Navio/Navio2/PWM.h"
-#include "Navio/Navio2/ADC_Navio2.h"
-#include "Navio/Navio2/Led_Navio2.h"
-#include "Navio/Navio2/LSM9DS1.h"
-#include "Navio/Navio2/RCInput_Navio2.h"
-#include "Navio/Navio2/RCOutput_Navio2.h"
-#include "Navio/Navio2/RGBled.h"
-#include "Navio/Common/ADC.h"
-#include "Navio/Common/gpio.h"
-#include "Navio/Common/I2Cdev.h"
-#include "Navio/Common/InertialSensor.h"
-#include "Navio/Common/Led.h"
-#include "Navio/Common/MPU9250.h"
-#include "Navio/Common/MS5611.h"
-#include "Navio/Common/RCInput.h"
-#include "Navio/Common/RCOutput.h"
-#include "Navio/Common/SPIdev.h"
-#include "Navio/Common/Ublox.h"
-#include "Navio/Common/Util.h"
-using namespace Navio;
-*/
+#include "offboard.h"
+
 using namespace std;
 
 int main() {
@@ -60,7 +38,7 @@ int main() {
 	stateEst[Y] =  0; // init kalman filter
 	stateEst[Z] = -4; // --
 
-	// autonomous or RC? this will aquired from ground terminal command 
+	// autonomous or RC? this will be aquired from ground terminal command 
 	bool autonomyEnabled = true;
 
 	// simulation or live?
@@ -69,17 +47,15 @@ int main() {
 	// bypass estimation and pass true state straight to guidance?
 	bool trueStateOnlyEnabled = true;
 
-	// set time properties
-	int step = 0;
-	float t = (float)0;
-	const float dt = (float)0.001; // rate = 1/.001 = 1000Hz
-	const float endt = (float)15;
 
-	int downSampleNav = 50; // 1000Hz / 50 = 20Hz
-	float dtNav = dt * downSampleNav;
+	// initalize sensors
+	auto mpu= std::unique_ptr <InertialSensor>{ new MPU9250() };
+	auto lsm = std::unique_ptr <InertialSensor>{ new LSM9DS1() };
 
-	float tOld = 0;
-	
+	mpu->initialize();
+	lsm->initialize();
+
+
 	// initialize csv writing (SIMULATION only)
 	ofstream myfile("dataLog.csv");
 
@@ -94,18 +70,17 @@ int main() {
 
 	myfile << labelTime << labelStick << labelPowerCmd << labelTrue << labelTrueDot << labelMeas << labelEst << labelDes << "\n";
 
-	// --test area--
+	// initilize time/rate properties
+	int step = 0;
+	float t = (float)0;
+	const float dt = (float)0.001; // rate = 1/.001 = 1000Hz
+	const float endt = (float)15;
+
+	int downSampleNav = 50; // 1000Hz / 50 = 20Hz
+	float dtNav = dt * downSampleNav;
+
+	float tOld = 0;
 	
-	//while (t <= endt - dt) {
-	//	step++;
-	//	t += dt;
-	//	vehicleModel(stateTrue, stateTrueDot, aTrue, powerCmd, dt);
-	//}
-
-	//cout << "test completed";
-	//return 0;
-	// -------------
-
 
 	// loopdy loop
 	while (t <= endt - dt) {
@@ -120,7 +95,7 @@ int main() {
 			sensorModel(stateTrue, aTrue, measData);
 		}
 		else {
-			readIMU(measData);
+			readIMU(measData, mpu, lsm);
 			readSonar(measData);
 			readCam(measData);
 		}

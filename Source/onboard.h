@@ -3,56 +3,31 @@
 #define onboard_h
 #include "stateDerivative.h"
 
-/* From the AccelGyroMag.cpp example
-#include "Common/MPU9250.h"
-#include "Navio2/LSM9DS1.h"
-#include "Common/Util.h"
+// From the AccelGyroMag.cpp example
+#include "Navio/Common/MPU9250.h"
+#include "Navio/Navio2/LSM9DS1.h"
+#include "Navio/Common/Util.h"
 #include <unistd.h>
 #include <string>
 #include <memory>
-*/
-/*
-#include "MPU9250.h" // IMU1 header
-#include "LSM9DS1.h" // IMU2 header
-#include "Util.h" // idk we just need it?
 
-#include <string>
-#include <memory>
-*/
-/*
-#include "Navio/Navio2/PWM.h"
-#include "Navio/Navio2/ADC_Navio2.h"
-#include "Navio/Navio2/Led_Navio2.h"
-#include "Navio/Navio2/LSM9DS1.h"
-#include "Navio/Navio2/RCInput_Navio2.h"
-#include "Navio/Navio2/RCOutput_Navio2.h"
-#include "Navio/Navio2/RGBled.h"
-#include "Navio/Common/ADC.h"
-#include "Navio/Common/gpio.h"
-#include "Navio/Common/I2Cdev.h"
-#include "Navio/Common/InertialSensor.h"
-#include "Navio/Common/Led.h"
-#include "Navio/Common/MPU9250.h"
-#include "Navio/Common/MS5611.h"
-#include "Navio/Common/RCInput.h"
-#include "Navio/Common/RCOutput.h"
-#include "Navio/Common/SPIdev.h"
-#include "Navio/Common/Ublox.h"
-#include "Navio/Common/Util.h"
+
 using namespace Navio;
 
 //Auto Ptr copying from Dr.Johnson's code 
-
+/*
 std::unique_ptr <InertialSensor> get_inertial_sensor() {
 
-#ifdef IMU_MPU9250
-	auto ptr = std::unique_ptr <InertialSensor>{ new MPU9250() };
-	return ptr;
-#endif
-#ifdef IMU_LSM9DS1
-	auto ptr = std::unique_ptr <InertialSensor>{ new LSM9DS1() };
-	return ptr;
-#endif
+	#ifdef IMU_MPU9250
+		auto ptr = std::unique_ptr <InertialSensor>{ new MPU9250() };
+		return ptr;
+	#endif
+	#ifdef IMU_LSM9DS1
+		auto ptr = std::unique_ptr <InertialSensor>{ new LSM9DS1() };
+		return ptr;
+	#endif
+
+}
 */
 
 void matMult(float a[12][12], float* b, float* mul);
@@ -370,60 +345,30 @@ void guidance(float* stateEst, float* stateDes, float* xyzpsiErrPast, float* xyz
 	}
 }
 
-void readIMU(float* imuData) {
-	/*
-	if (check_apm()) {
-        return 1;
-    }
-
-    auto sensor_name = get_sensor_name(argc, argv);
-    if (sensor_name.empty())
-        return EXIT_FAILURE;
-
-    auto sensor = get_inertial_sensor(sensor_name);
-
-    if (!sensor) {
-        printf("Wrong sensor name. Select: mpu or lsm\n");
-        return EXIT_FAILURE;
-    }
-
-    if (!sensor->probe()) {
-        printf("Sensor not enabled\n");
-        return EXIT_FAILURE;
-    }
-    sensor->initialize();
-
-	float ax, ay, az;
-	float gx, gy, gz;
-	float mx, my, mz;
-
-
-    while(1) {
-        sensor->update();
-        sensor->read_accelerometer(&ax, &ay, &az);
-        sensor->read_gyroscope(&gx, &gy, &gz);
-        sensor->read_magnetometer(&mx, &my, &mz);
-        printf("Acc: %+7.3f %+7.3f %+7.3f  ", ax, ay, az);
-        printf("Gyr: %+8.3f %+8.3f %+8.3f  ", gx, gy, gz);
-        printf("Mag: %+7.3f %+7.3f %+7.3f\n", mx, my, mz);
-		
-	*/
-	
+void readIMU(float* measData, sensor1, sensor2) {
 /*
+
 	//imu initializer
 	printf( "Init IMU and Mag\n" );
-	auto imu = get_inertial_sensor();    
-	if( !imu ) {
-		printf( "IMU not found\n" );
+	auto lsm = new LSM9DS1();
+	auto mpu = new MPU9250();
+
+	if( !lsm ) {
+		printf( "LSM not found\n" );
         return EXIT_FAILURE;
     }
+	if( !mpu ) {
+		printf( "MPU not found\n" );
+        return EXIT_FAILURE;
+    }
+
 	if( !imu->probe() ) {
         printf( "IMU not enabled\n" );
         return EXIT_FAILURE;
     }
     imu->initialize();	
 
-	//imu upadte
+	//imu update
 	imu->update();
 	imu->read_gyroscope( &wx, &wy, &wz );
 	wxTotal += wx;
@@ -440,21 +385,56 @@ void readIMU(float* imuData) {
 	IMUsamplesAuto++;
 
 	// imu 1 MPU9250
-	imuData[P1] = ax;
-	imuData[Q1] = ay;
-	imuData[R1] = az;
-	imuData[AX1] = wx;
-	imuData[AY1] = wy;
-	imuData[AZ1] = wz;
+	measData[P1] = ax;
+	measData[Q1] = ay;
+	measData[R1] = az;
+	measData[AX1] = wx;
+	measData[AY1] = wy;
+	measData[AZ1] = wz;
 
 	//imu 2 LSM9DS1
-	imuData[P2] = 0;
-	imuData[Q2] = 0;
-	imuData[R2] = 0;
-	imuData[AX2] = 0;
-	imuData[AY2] = 0;
-	imuData[AZ2] = 0;
-	*/
+	measData[P2] = 0;
+	measData[Q2] = 0;
+	measData[R2] = 0;
+	measData[AX2] = 0;
+	measData[AY2] = 0;
+	measData[AZ2] = 0;
+*/
+
+	// --- From the AccelGyroMag.cpp example --- //
+	// .\Examples\AccelGyroMag\AccelGyroMag.cpp
+
+	// measData // {x, y, z1, z2, p1, q1, r1, ax1, ay1, az1, p2, q2, r2, ax2, ay2, az2}
+
+	//if (check_apm()) { // not sure what this is or why it's in here, but it's in the example file
+	//	return;
+	//}
+
+
+	float a1, a2, a3;
+	float w1, w2, w3;
+
+	// mpu
+	mpu->update();
+	mpu->read_accelerometer(&a1, &a2, &a3);
+	mpu->read_gyroscope(&w1, &w2, &w3);
+	measeData[AX1] = -a2;
+	measeData[AY1] = -a1;
+	measeData[AZ1] = a3;
+	measeData[P1] = w2;
+	measeData[Q1] = w1;
+	measeData[R1] = -w3;
+
+	// lsm
+	lsm->update();
+	lsm->read_accelerometer(&a1, &a2, &a3);
+	lsm->read_gyroscope(&w1, &w2, &w3);
+	measeData[AX2] = -a2;
+	measeData[AY2] = -a1;
+	measeData[AZ2] = a3;
+	measeData[P2] = w2;
+	measeData[Q2] = w1;
+	measeData[R2] = -w3;
 }
 
 void readSonar(float* stateMeas) {
