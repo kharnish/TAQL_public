@@ -56,6 +56,10 @@ int main() {
 	stateDes[Y] =  0; // wants to reach landing pad which is at 0,0
 	stateDes[Z] = -4; // wants to stay 4 meters above the ground
 
+	stateEst[X] = -6; // --
+	stateEst[Y] =  0; // init kalman filter
+	stateEst[Z] = -4; // --
+
 	// autonomous or RC? this will aquired from ground terminal command 
 	bool autonomyEnabled = true;
 
@@ -68,8 +72,13 @@ int main() {
 	// set time properties
 	int step = 0;
 	float t = (float)0;
-	const float dt = (float)0.001;
+	const float dt = (float)0.001; // rate = 1/.001 = 1000Hz
 	const float endt = (float)15;
+
+	int downSampleNav = 50; // 1000Hz / 50 = 20Hz
+	float dtNav = dt * downSampleNav;
+
+	float tOld = 0;
 	
 	// initialize csv writing (SIMULATION only)
 	ofstream myfile("dataLog.csv");
@@ -116,8 +125,10 @@ int main() {
 			readCam(measData);
 		}
 
-		navigation(measData, powerCmd, PPast, stateEst);
-		
+		if (step % downSampleNav == 0) { // 1000Hz / 50 = 20Hz
+			navigation(measData, powerCmd, PPast, stateEst, dtNav); // dt will need to be the sample time when we run this at a different rate
+		}
+
 		if (trueStateOnlyEnabled) {
 			guidance(stateTrue, stateDes, xyzpsiErrPast, xyzpsiErrSum, stickAuto);
 		}

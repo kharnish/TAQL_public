@@ -3,14 +3,14 @@
 #define onboard_h
 #include "stateDerivative.h"
 
-// From the AccelGyroMag.cpp example
+/* From the AccelGyroMag.cpp example
 #include "Common/MPU9250.h"
 #include "Navio2/LSM9DS1.h"
 #include "Common/Util.h"
 #include <unistd.h>
 #include <string>
 #include <memory>
-
+*/
 /*
 #include "MPU9250.h" // IMU1 header
 #include "LSM9DS1.h" // IMU2 header
@@ -69,7 +69,6 @@ void matScale(float* a, float con, float* mul);
 
 void matAdd(float a[12][12], float b[12][12], float mul[12][12]);
 void matAdd(float a[3][3], float b[3][3], float mul[3][3]);
-void matAdd1(float* a, float* b, float* mul);
 
 void matSub(float* a, float* b, float* mul);
 void matInv(float a[3][3], float mul[3][3]);
@@ -102,7 +101,7 @@ void vehicleController(float* stick, float* measData, float* powerCmd) {
 	}
 }
 
-void navigation(float* measData, float* powerCmd, float PPast[12][12], float* stateEst) {
+void navigation(float* measData, float* powerCmd, float PPast[12][12], float* stateEst, float dt) {
 	// recieves sensor (measured) data and outputs estimated states from Kalman Filter
 	// helpful reference: http://robotsforroboticists.com/kalman-filtering/
 
@@ -115,7 +114,6 @@ void navigation(float* measData, float* powerCmd, float PPast[12][12], float* st
 
 
 	bool takeMeasure = true;
-	float dt = (float)0.05;
 
 	float accel[3] = { measData[AX1], measData[AY1], measData[AZ1] }; // we could include both weighted accelerometer measures
 
@@ -155,9 +153,13 @@ void navigation(float* measData, float* powerCmd, float PPast[12][12], float* st
 	CTransp[Y][1] = 1;
 	CTransp[Z][2] = 1;
 
-	float pMat[12][12] = { };
+	float pMat[12][12] = {};
 	float Qc[12][12] = {};	// expected values of disturbance (w^2)
-	float Rc[3][3] = {};	// expected values of noise variance (v^2)
+	float Rc[3][3] = {};	// expected values of measurement noise variance (v^2)
+	Rc[X][X] = sigX * sigX;
+	Rc[Y][Y] = sigY * sigY;
+	Rc[Z][Z] = sigZ2 * sigZ2;
+
 	float Kc[12][3] = {};	// how much we want to weight the error
 	float I[12][12] = {};	// identity matrix
 
@@ -165,7 +167,7 @@ void navigation(float* measData, float* powerCmd, float PPast[12][12], float* st
 	float xEstDot1 = 0, xEstDot2 = 0, xEstDot3 = 0, xEstDot4 = 0;
 	float xEst[12] = {};
 	float xEstNew[12] = {};
-	float stateMeas[12] = { };
+	float stateMeas[12] = {};
 	float stateEstPast[12] = {};
 
 	for (int i = 0; i < 12; i++)
@@ -178,10 +180,10 @@ void navigation(float* measData, float* powerCmd, float PPast[12][12], float* st
 			pMat[i][j] = PPast[i][j];
 		}
 	}
-	for (int i = 0; i < 3; i++) {
-		Rc[i][i] = 1;
-		stateMeas[i] = measData[i]; // only include the X, Y, Z camera data
-	}
+
+	stateMeas[X] = measData[X];
+	stateMeas[Y] = measData[Y];
+	stateMeas[Z] = measData[Z2];
 
 	// Start the actual agorithm
 	for (int i = 0; i < 12; i++)
@@ -261,7 +263,7 @@ void navigation(float* measData, float* powerCmd, float PPast[12][12], float* st
 	// why not? a little easter egg for our future selves
 
 	// correct the Kalman Filter with measurements
-	if (takeMeasure = true)
+	if (takeMeasure)
 	{
 		// make estimate of what the measures would be from xest = C*transp(Y)	
 		float yEst[3] = {};
@@ -300,7 +302,9 @@ void navigation(float* measData, float* powerCmd, float PPast[12][12], float* st
 		matMult4(Kc, C, temp1);						// t1 = Kc * C
 		matSub(stateMeas, stateMeasEst, temp12a);	// ta = stateMeas - stateMeasEst			[12x1 - 12x1 = 12x1]
 		matMult(temp1, temp12a, temp12b);			// Kc * C * (stateMeas - stateMeasEst)		[12x12 * 12x1 = 12x1]
-		matAdd1(totalXEstDot, temp12b, temp12a);	// newTotalXEstDot = totalXEstDot + Kc * C * (stateMeas - stateMeasEst)
+		for (int i = 0; i < 12; i++) {
+			temp12a[i] = totalXEstDot[i] + temp12b[i]; // newTotalXEstDot = totalXEstDot + Kc * C * (stateMeas - stateMeasEst)
+		}
 
 		// correct P estimate
 		matMult4(Kc, C, temp1);			// t1 = Kc * C
@@ -308,13 +312,15 @@ void navigation(float* measData, float* powerCmd, float PPast[12][12], float* st
 		matAdd(I, temp2, temp1);		// t1 = I + (-Kc*C)
 		matMult(temp2, pMatTemp, PPast); // pMatNew = (I - Kc * C) * pMat
 	}
-
+	
 	// actually finish integrating
-	float temp12[12] = {};
-	matScale(totalXEstDot, dt, temp12); // t1 = totalXEstDot * dt
-	matAdd1(xEst, temp12, xEstNew);		// xEstNew = xEstOld + totalXEstDot * dt
+
 	for (int i = 0; i < 12; i++) {
-		// stateEst[i] = xEstNew[i] // this is just commented out so it doesn't break anything
+		xEstNew[i] = xEst[i] + totalXEstDot[i] * dt;
+	}
+
+	for (int i = 0; i < 12; i++) {
+		stateEst[i] = xEstNew[i]; // this is just commented out so it doesn't break anything
 	}
 }
 
@@ -365,45 +371,43 @@ void guidance(float* stateEst, float* stateDes, float* xyzpsiErrPast, float* xyz
 }
 
 void readIMU(float* imuData) {
-	// --- From the AccelGyroMag.cpp example --- //
-	// .\Examples\AccelGyroMag\AccelGyroMag.cpp
-	
-	// measData // {x, y, z1, z2, p1, q1, r1, ax1, ay1, az1, p2, q2, r2, ax2, ay2, az2}
-
+	/*
 	if (check_apm()) {
         return 1;
     }
 
-    // auto sensor_name = get_sensor_name(argc, argv);
-	auto sensor_name1 = 'mpu';
-	auto sensor_name2 = 'lsm';
+    auto sensor_name = get_sensor_name(argc, argv);
+    if (sensor_name.empty())
+        return EXIT_FAILURE;
 
-    //auto sensor = get_inertial_sensor(sensor_name);
-	auto sensor1 = std::unique_ptr <InertialSensor>{ new MPU9250() };
-	auto sensor2 = std::unique_ptr <InertialSensor>{ new LSM9DS1() };
+    auto sensor = get_inertial_sensor(sensor_name);
 
-    sensor1->initialize();
-	sensor2->initialize();
+    if (!sensor) {
+        printf("Wrong sensor name. Select: mpu or lsm\n");
+        return EXIT_FAILURE;
+    }
+
+    if (!sensor->probe()) {
+        printf("Sensor not enabled\n");
+        return EXIT_FAILURE;
+    }
+    sensor->initialize();
 
 	float ax, ay, az;
 	float gx, gy, gz;
 	float mx, my, mz;
 
-	while (1) {
-		// so, I'm not actually sure what these functions are, or where to find them, but this is how they were in the example
-		sensor1->update();
-		sensor1->read_accelerometer(&ax, &ay, &az);
-		imuData[AX1] = ax;
-		imuData[AY1] = ay;
-		imuData[AZ1] = az;
-		sensor2->update();
-		sensor2->read_accelerometer(&ax, &ay, &az);
-		imuData[AX2] = ax;
-		imuData[AY2] = ay;
-		imuData[AZ2] = az;
-		// sensor->read_gyroscope(&gx, &gy, &gz);
-		// sensor->read_magnetometer(&mx, &my, &mz);
-	}
+
+    while(1) {
+        sensor->update();
+        sensor->read_accelerometer(&ax, &ay, &az);
+        sensor->read_gyroscope(&gx, &gy, &gz);
+        sensor->read_magnetometer(&mx, &my, &mz);
+        printf("Acc: %+7.3f %+7.3f %+7.3f  ", ax, ay, az);
+        printf("Gyr: %+8.3f %+8.3f %+8.3f  ", gx, gy, gz);
+        printf("Mag: %+7.3f %+7.3f %+7.3f\n", mx, my, mz);
+		
+	*/
 	
 /*
 	//imu initializer
@@ -610,13 +614,7 @@ void matAdd(float a[3][3], float b[3][3], float mul[3][3]) {
 		}
 	}
 }
-void matAdd1(float* a, float* b, float* mul) {
-	// Matrix addition of two 12x1 matrices
-	for (int i = 0; i < 12; i++)
-	{
-		mul[i] = a[i] + b[i];
-	}
-}
+
 void matSub(float* a, float* b, float* mul) {
 	// Matrix subtraction of two 12x1 matrices
 	for (int i = 0; i < 12; i++)

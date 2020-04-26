@@ -5,12 +5,12 @@
 #include <math.h>
 
 // camera
-#define sigX 0
-#define sigY 0
+#define sigX 0.05 // [m]
+#define sigY 0.05 // [m]
 #define sigZ1 0
 
 // sonar
-#define sigZ2 0
+#define sigZ2 0.05 // [m]
 
 // imu 1 (MPU)
 #define sigP1 0
@@ -29,6 +29,8 @@
 #define sigAX2 0
 #define sigAY2 0
 #define sigAZ2 0
+
+// define physical properties
 
 #define g 9.81  // [m/sec^2]
 #define m 0.654  // [kg]
